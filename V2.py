@@ -2,13 +2,17 @@ from datetime import date
 import PyPDF2
 import openpyxl
 import tkinter as tk
+from tkinter import filedialog
+from tkinter.ttk import Progressbar
 from openpyxl.styles import Alignment
 import os
 import PIL
 import fitz
 import io
+import time
 
 location = './imgs'
+pdfLocation = './'
 
 try:
     dir_list = os.listdir(location)
@@ -34,8 +38,13 @@ d1 = today.strftime("%d/%m/%Y")
 
 def openPDFFile(inp):
     try:
-        pdfFileObj = open(inp+'.pdf', 'rb')
+        pdfFileObj = open(inp, 'rb')
         pdfReader = PyPDF2.PdfFileReader(pdfFileObj)
+        if From_entry.get() == '':
+            From_entry.insert(-1, 1)
+        if To_entry.get() == '':
+            To_entry.insert(-1, pdfReader.numPages)
+
         return pdfReader, pdfFileObj
     except:
         return -1
@@ -43,7 +52,7 @@ def openPDFFile(inp):
 
 def openExcelFile(inp):
     try:
-        book = openpyxl.load_workbook('./Dependencies/'+inp+'.xlsx')
+        book = openpyxl.load_workbook(OLD_EXCEL_FILE.get())
         return book
     except:
         return -1
@@ -52,18 +61,22 @@ def openExcelFile(inp):
 def ExtractAllPages(pdfReader):
     page = ""
     try:
-        first_page = int(From_entry.get())
+        first_page = int(From_entry.get())-1
         last_page = int(To_entry.get())
     except:
         return -1
 
     if ((first_page < 0) or (last_page > pdfReader.numPages)):
+
         return -1
 
     for mainpage in range((first_page), last_page):
         page += (pdfReader.getPage(mainpage).extractText() + "\n")
 
-    pdf_file = fitz.open((PDF_FILE.get())+'.pdf')
+    progress_bar.step(30)
+    frame.update()
+
+    pdf_file = fitz.open((PDF_FILE.get()))
     location = './imgs'
     page_count = 0
     figure_count = 1
@@ -83,6 +96,10 @@ def ExtractAllPages(pdfReader):
                 figure_count += 1
         figure_count = 1
         page_count += 1
+        frame.update()
+
+    progress_bar.step(30)
+    frame.update()
 
     return page
 
@@ -168,7 +185,15 @@ def ParsingReqText(a, sheet):
             #print(lstr)
             if "رقم الطلب" in k:
                 match = k.replace("رقم الطلب", "")
-                sheet[('s' + str(rowTcount))].value = int(match)
+                try:
+                    sheet[('s' + str(rowTcount))].value = int(match)
+                except:
+                    message.config(text="")
+                    message.config(
+                        text="Choose proper pages for high accuracy", fg='orange')
+                    frame.update()
+                    time.sleep(2)
+                    break
                 sheet[('s' + str(rowTcount))
                       ].alignment = Alignment(horizontal='right')
                 sheet.row_dimensions[rowTcount].height = 150
@@ -203,6 +228,9 @@ def ParsingReqText(a, sheet):
                 match = match.replace("األ", "الا")
                 match = match.replace("اال", "الا")
 
+                match = match.replace("اإل", "الا")
+                match = match.replace("األ", "الا")
+                match = match.replace("اال", "الا")
                 sheet[('o' + str(rowPcount))].value = match
                 sheet[('o' + str(rowPcount))
                       ].alignment = Alignment(horizontal='right')
@@ -306,10 +334,16 @@ def ParsingReqText(a, sheet):
 
                 if "عنوان" in ''.join(a[c]):
                     ssss = (''.join(a[c]).split("عنوان الوكيل"))
-                    match = ssss[1]
+                    try:
+                        match = ssss[1]
+                    except:
+                        match = ""
                     match = match.replace("اسم الوكيل", "")
 
                     addressDone = 0
+                match = match.replace("اإل", "الا")
+                match = match.replace("األ", "الا")
+                match = match.replace("اال", "الا")
 
                 sheet[('AD' + str(rowAEcount))].value = match
                 sheet[('AD' + str(rowAEcount))
@@ -347,7 +381,9 @@ def ParsingReqText(a, sheet):
                             newLines += 1
                     except:
                         break
-
+                match = match.replace("اإل", "الا")
+                match = match.replace("األ", "الا")
+                match = match.replace("اال", "الا")
                 sheet[('AF'+str(rowAcount))].value = match
                 sheet[('AF'+str(rowAcount))
                       ].alignment = Alignment(horizontal='right')
@@ -450,9 +486,40 @@ def SaveExcelFile(book):
     return inp
 
 
+def browseFiles():
+    filename = filedialog.askopenfilename(initialdir="./",
+                                          title="Select a PDF file",
+                                          filetypes=(("PDF files",
+                                                      "*.pdf*"),
+                                                     ("All files",
+                                                         "*.*")))
+
+    # Change label contents
+#    label_file_explorer.configure(text="File Opened: "+filename)
+    PDF_FILE.delete(0, 'end')
+    PDF_FILE.insert(-1, filename)
+    openPDFFile(filename)
+    pdfLocation = filename
+    print(filename)
+
+
+def browseFilesTemp():
+    filename = filedialog.askopenfilename(initialdir="./",
+                                          title="Select a Template",
+                                          filetypes=(("XlSX files",
+                                                      "*.xlsx*"),
+                                                     ("All files",
+                                                         "*.*")))
+
+    # Change label contents
+#    label_file_explorer.configure(text="File Opened: "+filename)
+    OLD_EXCEL_FILE.delete(0, 'end')
+    OLD_EXCEL_FILE.insert(-1, filename)
+    print(filename)
+
+
 def Extract_button():
     message.config(text="")
-
     inp = PDF_FILE.get()
     if(openPDFFile(inp) == -1):
         message.config(text="Couldn't find "+inp+'.pdf', fg='red')
@@ -468,26 +535,45 @@ def Extract_button():
         book = openExcelFile(inp)
         sheet = book.active
 
-    if(ExtractAllPages(pdfReader) == -1):
+    progress_bar.place(x=100, y=170)
+    frame.update()
+
+    pages = ExtractAllPages(pdfReader)
+    if(pages == -1):
         message.config(text="Enter valid boundaries", fg='red')
         return
-    else:
-        pages = ExtractAllPages(pdfReader)
-    #pages = get_display(pages)
-    #print(pages)
+    frame.update()
 
     pages = ReshapeArabicText(pages)
     textList = splitText(pages)
     ParsingReqText(textList, sheet)
     sheet.column_dimensions['H'].width = 40
+    progress_bar.step(30)
+    frame.update()
 
     inp = NEW_EXCEL_FILE.get()
     if (SaveExcelFile(book) == -1):
         message.config(text='Make sure the output file is closed', fg='red')
-        return
+        frame.update()
+        old_time = time.time()
+        while(True):
+            if (SaveExcelFile(book) != -1):
+                message.config(text='Done Extracting', fg='green')
+                inp = SaveExcelFile(book)
+                break
+            if(time.time()-old_time > 20):
+                frame.quit()
+                break
+            message.config(text='Make sure the output file is closed '
+                           + str(20-(int(time.time()-old_time))), fg='red')
+            frame.update()
+            time.sleep(1)
     else:
         message.config(text='Done Extracting', fg='green')
         inp = SaveExcelFile(book)
+
+    progress_bar.step(10)
+    frame.update()
 
     pdfFileObj.close()
     os.startfile(inp)
@@ -502,12 +588,12 @@ frame.title("BOT")
 frame.geometry('400x200')
 
 #pdf to be read
-PDF_LABEL = tk.Label(frame, text="PDF file name ")
-PDF_LABEL.place(x=0, y=0)
+PDF_LABEL = tk.Label(frame, text="PDF file path")
+PDF_LABEL.place(x=0, y=5)
 
 PDF_FILE = tk.Entry(frame)
 PDF_FILE.insert(-1, '1')
-PDF_FILE.place(x=150, y=0)
+PDF_FILE.place(x=150, y=5)
 
 #first read page
 From = tk.Label(frame, text="From ")
@@ -515,7 +601,7 @@ From.place(x=150, y=30)
 
 From_entry = tk.Entry(frame, width=3)
 From_entry.place(x=185, y=30)
-From_entry.insert(-1, '3')
+#From_entry.insert(-1, '3')
 
 #last read page
 To = tk.Label(frame, text="To ")
@@ -523,16 +609,23 @@ To.place(x=210, y=30)
 
 To_entry = tk.Entry(frame, width=3)
 To_entry.place(x=230, y=30)
-To_entry.insert(-1, '53')
+#To_entry.insert(-1, '53')
 
 #template file name
-OLD_EXCEL_LABEL = tk.Label(frame, text="Template file name ")
+OLD_EXCEL_LABEL = tk.Label(frame, text="Template file path ")
 OLD_EXCEL_LABEL.place(x=0, y=60)
 
 OLD_EXCEL_FILE = tk.Entry(frame)
 OLD_EXCEL_FILE.insert(-1, 'Template')
 OLD_EXCEL_FILE.place(x=150, y=60)
+button_explore_temp = tk.Button(frame,
+                                text="Browse",
+                                command=browseFilesTemp,
+                                cursor='hand2',
+                                relief='ridge',
+                                height=1)
 
+button_explore_temp.place(x=280, y=57)
 #Saving file name
 NEW_EXCEL_LABEL = tk.Label(frame, text="Output file name ")
 NEW_EXCEL_LABEL.place(x=0, y=90)
@@ -548,11 +641,23 @@ ExtractButton = tk.Button(frame,
                           cursor='hand2',
                           command=Extract_button)
 ExtractButton.place(x=150, y=120)
+
+button_explore = tk.Button(frame,
+                           text="Browse",
+                           command=browseFiles,
+                           cursor='hand2',
+                           relief='ridge',
+                           height=1)
+
+button_explore.place(x=280, y=1)
 inp = tk.StringVar()
 
 # Label Creation
 message = tk.Label(frame, text="")
 message.place(x=130, y=150)
+
+progress_bar = Progressbar(frame, orient='horizontal', length=200,
+                           mode="determinate", takefocus=True, maximum=100)
 
 
 frame.mainloop()

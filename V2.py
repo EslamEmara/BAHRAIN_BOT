@@ -577,9 +577,9 @@ def Extract_button():
 
     pdfFileObj.close()
     os.startfile(inp)
-    dir_list = os.listdir(location)
-    for files in dir_list:
-        os.remove(location+'/'+files)
+    #dir_list = os.listdir(location)
+    #for files in dir_list:
+    #    os.remove(location+'/'+files)
 
 
 # Top level window
@@ -592,7 +592,7 @@ PDF_LABEL = tk.Label(frame, text="PDF file path")
 PDF_LABEL.place(x=0, y=5)
 
 PDF_FILE = tk.Entry(frame)
-PDF_FILE.insert(-1, '1')
+PDF_FILE.insert(-1, 'C:/Users/20109/OneDrive/Desktop/BOT_Project/1.pdf')
 PDF_FILE.place(x=150, y=5)
 
 #first read page
@@ -616,7 +616,8 @@ OLD_EXCEL_LABEL = tk.Label(frame, text="Template file path ")
 OLD_EXCEL_LABEL.place(x=0, y=60)
 
 OLD_EXCEL_FILE = tk.Entry(frame)
-OLD_EXCEL_FILE.insert(-1, 'Template')
+OLD_EXCEL_FILE.insert(-1,
+                      'C:/Users/20109/OneDrive/Desktop/BOT_Project/Dependencies/Template.xlsx')
 OLD_EXCEL_FILE.place(x=150, y=60)
 button_explore_temp = tk.Button(frame,
                                 text="Browse",

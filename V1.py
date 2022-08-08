@@ -1,21 +1,25 @@
 from datetime import date
 import PyPDF2
 import openpyxl
-
 import tkinter as tk
 from tkinter import filedialog
 from tkinter.ttk import Progressbar
 from openpyxl.styles import Alignment
 from openpyxl.styles import Color, PatternFill
 from openpyxl.styles import colors
-
 import os
 import PIL
-import fitz
-import io
 import time
-import shutil
+import pdfminer
+from pdfminer.image import ImageWriter
+from pdfminer.high_level import extract_pages
+import pytesseract
+from textblob import TextBlob
+import easyocr
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
 
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 location = './imgs'
 pdfLocation = './'
@@ -31,11 +35,6 @@ logo = PIL.Image.open('./Dependencies/mainLogo.png')
 hyp = PIL.Image.open('./Dependencies/Hyperlogo.png')
 
 
-#from ar_corrector.corrector import Corrector
-
-#corr = Corrector()
-#match = corr.contextual_correct(match)
-
 today = date.today()
 
 # dd/mm/YY
@@ -43,6 +42,7 @@ d1 = today.strftime("%d/%m/%Y")
 
 
 def openPDFFile(inp):
+    global miner_pages
     try:
         pdfFileObj = open(inp, 'rb')
         pdfReader = PyPDF2.PdfFileReader(pdfFileObj)
@@ -56,6 +56,16 @@ def openPDFFile(inp):
         return -1
 
 
+def get_image(layout_object):
+    if isinstance(layout_object, pdfminer.layout.LTImage):
+        return layout_object
+    if isinstance(layout_object, pdfminer.layout.LTContainer):
+        for child in layout_object:
+            return get_image(child)
+    else:
+        return None
+
+
 def openExcelFile(inp):
     try:
         book = openpyxl.load_workbook(OLD_EXCEL_FILE.get())
@@ -64,15 +74,16 @@ def openExcelFile(inp):
         return -1
 
 
-def ExtractAllPages(pdfReader):
+def ExtractAllPages(inp, pdfReader):
     page = ""
+
     try:
         first_page = int(From_entry.get())-1
-        last_page = int(To_entry.get())
+        last_page = int(To_entry.get())+1
     except:
         return -1
 
-    if ((first_page < 0) or (last_page > pdfReader.numPages)):
+    if ((first_page < 0) or (last_page > pdfReader.numPages+1)):
 
         return -1
 
@@ -81,33 +92,44 @@ def ExtractAllPages(pdfReader):
 
     progress_bar.step(30)
     frame.update()
+    miner_pages = list(extract_pages(inp))
 
-    pdf_file = fitz.open((PDF_FILE.get()))
-    location = './imgs'
-    page_count = 0
-    figure_count = 1
-    prevImg = []
-    for current_page_index in range(first_page, last_page):
-        prevImg = []
-        for img_index, img in enumerate(pdf_file.get_page_images(current_page_index)):
-            xref = img[0]
-            image = fitz.Pixmap(pdf_file, xref)
-            #if it is a is GRAY or RGB image
-            if image.n >= 5:
-                image = fitz.Pixmap(fitz.csRGB, image)
-            img = PIL.Image.open(io.BytesIO(image.tobytes()))
+    directory = r'./imgs/'
+    counter = 2
+    logo = PIL.Image.open('./Dependencies/mainLogo.png')
+    hyp = PIL.Image.open('./Dependencies/Hyperlogo.png')
 
-            if list(logo.getdata()) != list(img.getdata()) and (list(hyp.getdata()) != list(img.getdata())):
-                if(list(img.getdata()) != prevImg):
-                    image.save(location+'/' + str(page_count)
-                               + '_' + str(figure_count) + ".png")
-                    prevImg = list(img.getdata())
-                    figure_count += 1
-        figure_count = 1
-        page_count += 1
-        frame.update()
+    for i in range(first_page, last_page):
+        min_page = miner_pages[i]
+        images = list(filter(bool, map(get_image, min_page)))
+        iw = ImageWriter('./imgs/')
 
-    progress_bar.step(30)
+        for image in images:
+            image.name = str(counter)
+            iw.export_image(image)
+
+            try:
+                im = PIL.Image.open(directory+image.name+'.jpg')
+                name = directory+image.name+'.jpg'
+            except:
+                im = PIL.Image.open(directory+image.name+'.bmp')
+                name = directory+image.name+'.bmp'
+
+            rgb_im = im.convert('RGB')
+            pngName = directory+image.name+'.png'
+            rgb_im.save(pngName)
+
+            os.remove(name)
+
+            img = PIL.Image.open(pngName)
+            if list(logo.getdata()) == list(img.getdata()) or (list(hyp.getdata()) == list(img.getdata())):
+                os.remove(pngName)
+                continue
+
+            counter += 1
+            frame.update()
+
+    progress_bar.step(40)
     frame.update()
 
     return page
@@ -207,6 +229,58 @@ def ParsingReqText(a, sheet):
                 sheet[('s' + str(rowTcount))
                       ].alignment = Alignment(horizontal='right')
                 sheet.row_dimensions[rowTcount].height = 150
+
+                imgPath = './imgs/'+str(rowTcount)+'.png'
+
+                reader = easyocr.Reader(['en'], gpu=True)
+                result = reader.readtext(imgPath)
+                try:
+                    if(int(result[0][2]*10.00) >= 5):
+                        match = result[0][1]
+                        try:
+                            if(int(result[1][2]*10.00) >= 4):
+                                match = match+' '+result[1][1]
+                        except:
+                            pass
+                        sheet[('a' + str(rowTcount))].value = match
+                        tb = TextBlob(match)
+                        try:
+                            translated = tb.translate(from_lang='eng', to="ar")
+                            sheet[('b' + str(rowTcount))
+                                  ].value = str(translated)
+                        except:
+                            pass
+                    else:
+                        reader = easyocr.Reader(['ar'], gpu=False)
+                        result = reader.readtext(imgPath)
+                        if(int(result[0][2]*10.00) >= 5):
+                            match = result[0][1]
+                            try:
+                                if(int(result[1][2]*10.00) >= 4):
+                                    match = match+' '+result[1][1]
+                            except:
+                                pass
+                        else:
+                            match = "none"
+
+                    sheet[('b' + str(rowTcount))].value = match
+                    tb = TextBlob(match)
+                    try:
+                        translated = tb.translate(from_lang='ar', to="eng")
+                        sheet[('a' + str(rowTcount))].value = str(translated)
+                    except:
+                        pass
+
+                except:
+                    pass
+
+                try:
+                    img = openpyxl.drawing.image.Image(
+                        './imgs/'+str(rowTcount)+'.png')
+                    img.anchor = 'H' + str(rowTcount)
+                    sheet.add_image(img)
+                except:
+                    pass
                 rowTcount += 1
                 numberPerPage += 1
                 f1 = 1
@@ -404,36 +478,6 @@ def ParsingReqText(a, sheet):
                 break
 
             if ("ا لعدد" in lstr):
-                #print("user per page= ", numberPerPage)
-                figures = 0
-                for pop in dir_list:
-                    if (pop.split('_')[0]) == str(pageNumber):
-                        figures += 1
-            #    print("figures in page= ", figures, " in ", pageNumber)
-                users_per_page.append(numberPerPage)
-                images_per_page.append(figures)
-                '''
-                if (pageNumber != -1):
-                    if(numberPerPage == figures):
-                        for no_of_figs in range(figures):
-                            img = openpyxl.drawing.image.Image(
-                                './imgs/'+str(pageNumber)+'_'+str(no_of_figs+1)+'.png')
-                            img.anchor = 'H' + \
-                                str(rowTcount-numberPerPage+no_of_figs)
-                            sheet.add_image(img)
-                            try:
-                                #sheet.row_dimensions[rowTcount
-                                #                     - numberPerPage+no_of_figs].height = 200
-                                sheet['H' + str(rowTcount-numberPerPage+no_of_figs)].alignment = Alignment(
-                                    horizontal='center', vertical='center')
-                            except:
-                                pass
-                            #os.remove('./imgs/'+str(pageNumber)
-                            #          + '_'+str(no_of_figs+1)+'.png')
-                '''
-                numberPerPage = 0
-                pageNumber += 1
-
                 match = lstr.replace("ا لعدد", "")
                 PublicationNumber = match.split('–')[0]
                 PubDate = match.split('–')[1]
@@ -479,67 +523,11 @@ def ParsingReqText(a, sheet):
                 else:
                     rowAcount += 1
 
-    figures = 0
-    for pop in dir_list:
-        if (pop.split('_')[0]) == str(pageNumber+1):
-            figures += 1
-
-    users_per_page.append(numberPerPage)
-    images_per_page.append(figures)
-
     sheet[('AA'+str(rowTcount))].value = ""
     sheet[('AL'+str(rowTcount))].value = ""
     sheet[('AJ'+str(rowTcount))].value = ""
     sheet[('J'+str(rowTcount))].value = ''
     sheet[('L'+str(rowTcount))].value = ''
-
-    print(users_per_page)
-    print(images_per_page)
-
-    rowTcount = 2
-    i = 0
-    ims = []
-    saved = ''
-    for i in range(len(users_per_page)):
-        no = 0
-        rowTcount += users_per_page[i]
-        if users_per_page[i] != images_per_page[i]:
-            for jj in range(images_per_page[i]):
-                #print(jj, ' ', images_per_page[i])
-                for kk in range(no, users_per_page[i]):
-                    if((sheet[('O'+str(rowTcount-users_per_page[i]+kk))].value == sheet[('O'+str(rowTcount-users_per_page[i]+kk+1))].value)):
-                        img = openpyxl.drawing.image.Image(
-                            './imgs/'+str(i-1)+'_'+str(jj+1)+'.png')
-                    #    if ((sheet['H' + str(rowTcount-users_per_page[i]+kk)].value) != None):
-                    #        sheet['H' + str(rowTcount-users_per_page[i]+kk)].fill = PatternFill(
-                    #            "solid", start_color="5cb800")
-
-                        img.anchor = 'H' + str(rowTcount-users_per_page[i]+kk)
-
-                        if(img.anchor in ims):
-                            sheet[img.anchor].fill = PatternFill(
-                                "solid", start_color="5cb800")
-
-                        ims.append(img.anchor)
-                        sheet.add_image(img)
-                    else:
-                        img = openpyxl.drawing.image.Image(
-                            './imgs/'+str(i-1)+'_'+str(jj+1)+'.png')
-                        img.anchor = 'H' + str(rowTcount-users_per_page[i]+kk)
-                        if(img.anchor in ims):
-                            sheet[img.anchor].fill = PatternFill(
-                                "solid", start_color="5cb800")
-                        ims.append(img.anchor)
-                        sheet.add_image(img)
-                        no = kk+1
-                        break
-        else:
-            for no_of_figs in range(users_per_page[i]):
-                img = openpyxl.drawing.image.Image(
-                    './imgs/'+str(i-1)+'_'+str(no_of_figs+1)+'.png')
-                img.anchor = 'H' + \
-                    str(rowTcount-users_per_page[i]+no_of_figs)
-                sheet.add_image(img)
 
 
 def SaveExcelFile(book):
@@ -607,7 +595,7 @@ def Extract_button():
     progress_bar.place(x=100, y=170)
     frame.update()
 
-    pages = ExtractAllPages(pdfReader)
+    pages = ExtractAllPages(PDF_FILE.get(), pdfReader)
     if(pages == -1):
         message.config(text="Enter valid boundaries", fg='red')
         return
@@ -617,7 +605,7 @@ def Extract_button():
     textList = splitText(pages)
     ParsingReqText(textList, sheet)
     sheet.column_dimensions['H'].width = 40
-    progress_bar.step(30)
+    progress_bar.step(20)
     frame.update()
 
     inp = NEW_EXCEL_FILE.get()
@@ -647,8 +635,8 @@ def Extract_button():
     pdfFileObj.close()
     os.startfile(inp)
     dir_list = os.listdir(location)
-    for files in dir_list:
-        os.remove(location+'/'+files)
+    #for files in dir_list:
+    #    os.remove(location+'/'+files)
 
 
 # Top level window
